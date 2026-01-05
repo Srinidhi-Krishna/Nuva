@@ -1,912 +1,1382 @@
 // ====================
-// FILE: content.js - COMPLETE VERSION
+// NUVA AI ASSISTANT - ENHANCED COMPLETE VERSION (CHROME EXTENSION FIXED)
 // ====================
 
 const API_KEY = MY_API_KEY;
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
-let preferences = {
-  theme: 'light',
-  primaryColor: '#667eea',
-  secondaryColor: '#764ba2',
-  dyslexicMode: false
-};
+let hoverTimeout = null;
+let currentTooltip = null;
+let currentTheme = 'light';
+let primaryColor = '#667eea';
+let secondaryColor = '#764ba2';
+let dyslexicMode = false;
+let selectedText = '';
+let selectionMode = false;
 
-if (chrome && chrome.storage) {
-  chrome.storage.local.get('nuvaPreferences', (result) => {
-    if (result.nuvaPreferences) {
-      preferences = { ...preferences, ...result.nuvaPreferences };
-      applyPreferences();
+// FIXED: Check if extension is already loaded
+if (!document.getElementById('nuva-root')) {
+  loadSettings().then(() => {
+    initNuva();
+  }).catch(() => {
+    initNuva();
+  });
+}
+
+// FIXED: Use chrome.storage instead of localStorage
+async function loadSettings() {
+  try {
+    const result = await chrome.storage.local.get([
+      'nuva-theme',
+      'nuva-primary',
+      'nuva-secondary',
+      'nuva-dyslexic'
+    ]);
+    
+    currentTheme = result['nuva-theme'] || 'light';
+    primaryColor = result['nuva-primary'] || '#667eea';
+    secondaryColor = result['nuva-secondary'] || '#764ba2';
+    dyslexicMode = result['nuva-dyslexic'] === true;
+  } catch (e) {
+    console.log('Using default settings');
+  }
+}
+
+// FIXED: Use chrome.storage instead of localStorage
+async function saveSettings() {
+  try {
+    await chrome.storage.local.set({
+      'nuva-theme': currentTheme,
+      'nuva-primary': primaryColor,
+      'nuva-secondary': secondaryColor,
+      'nuva-dyslexic': dyslexicMode
+    });
+  } catch (e) {
+    console.log('Could not save settings');
+  }
+}
+
+function initNuva() {
+  createFloatingButton();
+  createInlinePanel();
+  enableWordHover();
+  enableTextSelection();
+}
+
+function enableTextSelection() {
+  document.addEventListener('mouseup', () => {
+    const selection = window.getSelection();
+    const text = selection.toString().trim();
+    
+    if (text && text.length > 10) {
+      selectedText = text;
+      selectionMode = true;
+      
+      const root = document.getElementById('nuva-root');
+      if (root && root.shadowRoot) {
+        const panel = root.shadowRoot.querySelector('.nuva-panel');
+        if (!panel.classList.contains('active')) {
+          togglePanel();
+        }
+        updateSelectionUI(root.shadowRoot);
+      }
     }
   });
 }
 
-if (!document.getElementById('nuva-panel')) {
-  createPanel();
+function updateSelectionUI(shadow) {
+  const selectionBanner = shadow.getElementById('selection-banner');
+  const analyzeBtn = shadow.getElementById('analyze-btn');
+  
+  if (selectionMode && selectedText) {
+    selectionBanner.style.display = 'block';
+    selectionBanner.querySelector('.selection-text-preview').textContent = 
+      selectedText.length > 100 ? selectedText.substring(0, 100) + '...' : selectedText;
+    analyzeBtn.innerHTML = `🚀 Analyze Selected Text`;
+  } else {
+    selectionBanner.style.display = 'none';
+    analyzeBtn.innerHTML = `🚀 Analyze This Page`;
+  }
 }
 
-function createPanel() {
-  const overlay = document.createElement('div');
-  overlay.id = 'nuva-panel';
-  overlay.innerHTML = `
-    <div class="nuva-panel-container">
-      <div class="nuva-header">
-        <div class="nuva-title">
-          <span class="nuva-icon">✨</span>
-          <span>Nuva AI Assistant</span>
+function createFloatingButton() {
+  const fab = document.createElement('div');
+  fab.id = 'nuva-fab';
+  fab.innerHTML = '✨';
+  fab.title = 'Open Nuva AI';
+  
+  const fabStyle = document.createElement('style');
+  fabStyle.textContent = `
+    #nuva-fab {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      width: 60px;
+      height: 60px;
+      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      cursor: pointer;
+      box-shadow: 0 4px 20px ${primaryColor}66;
+      z-index: 999998;
+      transition: all 0.3s ease;
+      animation: fabPulse 2s infinite;
+    }
+    
+    #nuva-fab:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 30px ${primaryColor}99;
+    }
+    
+    @keyframes fabPulse {
+      0%, 100% { box-shadow: 0 4px 20px ${primaryColor}66; }
+      50% { box-shadow: 0 6px 30px ${primaryColor}99; }
+    }
+  `;
+  
+  document.head.appendChild(fabStyle);
+  document.body.appendChild(fab);
+  
+  fab.addEventListener('click', togglePanel);
+}
+
+function createInlinePanel() {
+  const container = document.createElement('div');
+  container.id = 'nuva-root';
+  document.body.appendChild(container);
+  
+  const shadow = container.attachShadow({ mode: 'open' });
+  
+  const style = document.createElement('style');
+  style.textContent = getThemeStyles();
+  
+  const panel = document.createElement('div');
+  panel.className = 'nuva-panel';
+  panel.innerHTML = `
+    <div class="nuva-header">
+      <div class="nuva-title">
+        <span>✨</span>
+        <span>Nuva AI Assistant</span>
+      </div>
+      <div class="nuva-header-actions">
+        <button class="nuva-icon-btn" id="settings-btn" title="Settings">⚙️</button>
+        <button class="nuva-icon-btn" id="theme-btn" title="Toggle Theme">${currentTheme === 'dark' ? '☀️' : '🌙'}</button>
+        <button class="nuva-close" id="close-btn">✕</button>
+      </div>
+    </div>
+    
+    <div class="nuva-content" id="main-content">
+      <div class="selection-banner" id="selection-banner" style="display: none;">
+        <div class="selection-info">
+          <span class="selection-icon">📝</span>
+          <div class="selection-details">
+            <strong>Selected Text Active</strong>
+            <p class="selection-text-preview"></p>
+          </div>
+          <button class="clear-selection-btn" id="clear-selection-btn">✕</button>
         </div>
-        <div class="nuva-header-controls">
-          <button class="nuva-settings-btn" id="nuva-settings-toggle" title="Settings">⚙️</button>
-          <button class="nuva-theme-toggle" id="nuva-theme-toggle" title="Toggle Theme">🌙</button>
-          <button class="nuva-close" id="nuva-close">✕</button>
+      </div>
+
+      <div class="nuva-tabs">
+        <button class="nuva-tab active" data-tab="summarize">📝 Summarize</button>
+        <button class="nuva-tab" data-tab="simplify">🔤 Simplify</button>
+        <button class="nuva-tab" data-tab="points">📋 Key Points</button>
+        <button class="nuva-tab" data-tab="doubt">💬 Ask Doubt</button>
+      </div>
+      
+      <div class="nuva-settings">
+        <label class="nuva-label">
+          <span>Detail Level:</span>
+          <select id="intensity-select" class="nuva-select">
+            <option value="short">Brief Overview</option>
+            <option value="medium" selected>Standard Detail</option>
+            <option value="detailed">Comprehensive Analysis</option>
+          </select>
+        </label>
+      </div>
+      
+      <div class="doubt-section" id="doubt-section" style="display: none;">
+        <div class="doubt-input-wrapper">
+          <textarea id="doubt-input" class="doubt-input" placeholder="Type your doubt or question here..." rows="3"></textarea>
+          <button class="nuva-analyze-btn" id="ask-doubt-btn">💬 Ask Doubt</button>
         </div>
       </div>
       
-      <div class="nuva-settings-panel" id="nuva-settings-panel" style="display: none;">
-        <h3 style="margin: 0 0 15px 0; font-size: 16px;">Customization</h3>
-        
-        <div class="nuva-setting-group">
-          <label class="nuva-setting-label">
-            <span>🎨 Primary Color</span>
-            <input type="color" id="nuva-primary-color" value="#667eea" class="nuva-color-input">
-          </label>
+      <button class="nuva-analyze-btn" id="analyze-btn">🚀 Analyze This Page</button>
+      
+      <div class="nuva-result" id="result-area">
+        <div class="nuva-placeholder">
+          <div class="nuva-placeholder-icon">📄</div>
+          <p>Click "Analyze This Page" to get started!</p>
+          <p class="nuva-hint">
+            💡 Tips:<br>
+            • Hover over any word for 1 second to see its definition<br>
+            • Select text on the page to analyze just that portion<br>
+            • Works with PDFs, Google Docs, Slides, Sheets, Notion, and all web content
+          </p>
         </div>
-        
-        <div class="nuva-setting-group">
-          <label class="nuva-setting-label">
-            <span>🎨 Secondary Color</span>
-            <input type="color" id="nuva-secondary-color" value="#764ba2" class="nuva-color-input">
-          </label>
-        </div>
-        
-        <div class="nuva-setting-group">
-          <label class="nuva-setting-label">
-            <span>📖 Dyslexic Mode</span>
-            <label class="nuva-toggle">
-              <input type="checkbox" id="nuva-dyslexic-toggle">
-              <span class="nuva-toggle-slider"></span>
-            </label>
-          </label>
-          <p class="nuva-setting-hint">Uses OpenDyslexic font for better readability</p>
-        </div>
-        
-        <button class="nuva-save-settings" id="nuva-save-settings">💾 Save Settings</button>
       </div>
       
-      <div class="nuva-content">
-        <div class="nuva-tabs">
-          <button class="nuva-tab active" data-tab="restructure" title="AI-powered text restructuring">🔄 Restructure</button>
-          <button class="nuva-tab" data-tab="simplify" title="Simplified conceptual breakdown">🔤 Simplify</button>
-          <button class="nuva-tab" data-tab="organize" title="Improved visual organization">📋 Organize</button>
-          <button class="nuva-tab" data-tab="doubt" title="Ask questions about the content">💬 Ask Doubt</button>
-        </div>
-        
-        <div class="nuva-settings" id="nuva-intensity-settings">
-          <label class="nuva-label">
-            <span>Intensity:</span>
-            <select id="nuva-intensity" class="nuva-select">
-              <option value="low">Low</option>
-              <option value="mid" selected>Mid</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-        </div>
-        
-        <div class="nuva-doubt-input" id="nuva-doubt-input" style="display: none;">
-          <textarea 
-            id="nuva-doubt-question" 
-            class="nuva-doubt-textarea" 
-            placeholder="Ask your question about the content..."
-            rows="3"
-          ></textarea>
-        </div>
-        
-        <div class="nuva-source-options">
-          <label class="nuva-source-label">
-            <input type="radio" name="source" value="page" checked>
-            <span>📄 Entire Page</span>
-          </label>
-          <label class="nuva-source-label">
-            <input type="radio" name="source" value="selection">
-            <span>✂️ Selected Text</span>
-          </label>
-          <label class="nuva-source-label">
-            <input type="radio" name="source" value="pdf">
-            <span>📕 PDF Viewer</span>
-          </label>
-        </div>
-        
-        <button class="nuva-analyze-btn" id="nuva-analyze">
-          🚀 Transform
-        </button>
-        
-        <div class="nuva-result" id="nuva-result">
-          <div class="nuva-placeholder">
-            <div class="nuva-placeholder-icon">📄</div>
-            <p>Click "Transform" to restructure content!</p>
-            <p class="nuva-hint">Select your source and let AI improve readability.</p>
+      <div class="nuva-loading" id="loading-area" style="display: none;">
+        <div class="nuva-spinner"></div>
+        <p>Analyzing content with AI...</p>
+      </div>
+    </div>
+
+    <div class="nuva-settings-panel" id="settings-panel" style="display: none;">
+      <div class="settings-header">
+        <h3>⚙️ Customization</h3>
+        <button class="nuva-icon-btn" id="back-btn">←</button>
+      </div>
+      
+      <div class="settings-content">
+        <div class="setting-group">
+          <label class="setting-label">Theme Mode</label>
+          <div class="theme-toggle-wrapper">
+            <div class="theme-toggle-container">
+              <input type="checkbox" id="theme-toggle-checkbox" ${currentTheme === 'dark' ? 'checked' : ''}>
+              <label for="theme-toggle-checkbox" class="theme-toggle-label">
+                <span class="theme-toggle-inner">
+                  <span class="theme-icon sun">☀️</span>
+                  <span class="theme-icon moon">🌙</span>
+                </span>
+                <span class="theme-toggle-switch"></span>
+              </label>
+            </div>
+            <span class="theme-toggle-text">${currentTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
           </div>
         </div>
-        
-        <div class="nuva-loading" id="nuva-loading" style="display: none;">
-          <div class="nuva-spinner"></div>
-          <p>Transforming content with AI...</p>
+
+        <div class="setting-group">
+          <label class="setting-label">Dyslexic Mode</label>
+          <div class="theme-toggle-wrapper">
+            <div class="theme-toggle-container dyslexic-toggle">
+              <input type="checkbox" id="dyslexic-toggle-checkbox" ${dyslexicMode ? 'checked' : ''}>
+              <label for="dyslexic-toggle-checkbox" class="theme-toggle-label">
+                <span class="theme-toggle-inner">
+                  <span class="toggle-text off">OFF</span>
+                  <span class="toggle-text on">ON</span>
+                </span>
+                <span class="theme-toggle-switch"></span>
+              </label>
+            </div>
+            <span class="theme-toggle-text">Larger fonts & spacing</span>
+          </div>
         </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Primary Color</label>
+          <div class="color-picker">
+            <div class="color-options">
+              <button class="color-option primary" data-color="#667eea" style="background: #667eea"></button>
+              <button class="color-option primary" data-color="#f093fb" style="background: #f093fb"></button>
+              <button class="color-option primary" data-color="#4facfe" style="background: #4facfe"></button>
+              <button class="color-option primary" data-color="#43e97b" style="background: #43e97b"></button>
+              <button class="color-option primary" data-color="#fa709a" style="background: #fa709a"></button>
+              <button class="color-option primary" data-color="#feca57" style="background: #feca57"></button>
+              <button class="color-option primary" data-color="#ff6b6b" style="background: #ff6b6b"></button>
+              <button class="color-option primary" data-color="#ee5a6f" style="background: #ee5a6f"></button>
+            </div>
+            <div class="custom-color-wrapper">
+              <label for="custom-primary">Custom:</label>
+              <input type="color" id="custom-primary" value="${primaryColor}">
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label class="setting-label">Secondary Color</label>
+          <div class="color-picker">
+            <div class="color-options">
+              <button class="color-option secondary" data-color="#764ba2" style="background: #764ba2"></button>
+              <button class="color-option secondary" data-color="#4facfe" style="background: #4facfe"></button>
+              <button class="color-option secondary" data-color="#00f2fe" style="background: #00f2fe"></button>
+              <button class="color-option secondary" data-color="#38f9d7" style="background: #38f9d7"></button>
+              <button class="color-option secondary" data-color="#fee140" style="background: #fee140"></button>
+              <button class="color-option secondary" data-color="#ff6a88" style="background: #ff6a88"></button>
+              <button class="color-option secondary" data-color="#c471f5" style="background: #c471f5"></button>
+              <button class="color-option secondary" data-color="#fa709a" style="background: #fa709a"></button>
+            </div>
+            <div class="custom-color-wrapper">
+              <label for="custom-secondary">Custom:</label>
+              <input type="color" id="custom-secondary" value="${secondaryColor}">
+            </div>
+          </div>
+        </div>
+
+        <button class="nuva-analyze-btn" id="reset-settings">🔄 Reset to Defaults</button>
       </div>
     </div>
   `;
   
-  document.body.appendChild(overlay);
+  const backdrop = document.createElement('div');
+  backdrop.className = 'nuva-backdrop';
   
-  const style = document.createElement('style');
-  style.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=OpenDyslexic:wght@400;700&display=swap');
+  shadow.appendChild(style);
+  shadow.appendChild(backdrop);
+  shadow.appendChild(panel);
+  
+  setupEventListeners(shadow);
+}
+
+function setupEventListeners(shadow) {
+  let currentMode = 'summarize';
+  
+  shadow.getElementById('close-btn').addEventListener('click', togglePanel);
+  shadow.querySelector('.nuva-backdrop').addEventListener('click', togglePanel);
+  
+  shadow.getElementById('clear-selection-btn').addEventListener('click', () => {
+    selectedText = '';
+    selectionMode = false;
+    updateSelectionUI(shadow);
+  });
+
+  shadow.getElementById('theme-btn').addEventListener('click', async () => {
+    currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+    await saveSettings();
+    updateTheme(shadow);
+  });
+
+  shadow.getElementById('settings-btn').addEventListener('click', () => {
+    shadow.getElementById('main-content').style.display = 'none';
+    shadow.getElementById('settings-panel').style.display = 'block';
+  });
+
+  shadow.getElementById('back-btn').addEventListener('click', () => {
+    shadow.getElementById('settings-panel').style.display = 'none';
+    shadow.getElementById('main-content').style.display = 'block';
+  });
+
+  shadow.getElementById('theme-toggle-checkbox').addEventListener('change', async (e) => {
+    currentTheme = e.target.checked ? 'dark' : 'light';
+    await saveSettings();
+    updateTheme(shadow);
+    shadow.querySelector('.theme-toggle-text').textContent = currentTheme === 'dark' ? 'Dark Mode' : 'Light Mode';
+  });
+
+  shadow.getElementById('dyslexic-toggle-checkbox').addEventListener('change', async (e) => {
+    dyslexicMode = e.target.checked;
+    await saveSettings();
+    updateTheme(shadow);
+  });
+
+  shadow.querySelectorAll('.color-option.primary').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      primaryColor = btn.dataset.color;
+      await saveSettings();
+      updateTheme(shadow);
+      updateFAB();
+    });
+  });
+
+  shadow.querySelectorAll('.color-option.secondary').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      secondaryColor = btn.dataset.color;
+      await saveSettings();
+      updateTheme(shadow);
+      updateFAB();
+    });
+  });
+
+  shadow.getElementById('custom-primary').addEventListener('change', async (e) => {
+    primaryColor = e.target.value;
+    await saveSettings();
+    updateTheme(shadow);
+    updateFAB();
+  });
+
+  shadow.getElementById('custom-secondary').addEventListener('change', async (e) => {
+    secondaryColor = e.target.value;
+    await saveSettings();
+    updateTheme(shadow);
+    updateFAB();
+  });
+
+  shadow.getElementById('reset-settings').addEventListener('click', async () => {
+    currentTheme = 'light';
+    primaryColor = '#667eea';
+    secondaryColor = '#764ba2';
+    dyslexicMode = false;
+    await saveSettings();
+    updateTheme(shadow);
+    updateFAB();
+    shadow.getElementById('theme-toggle-checkbox').checked = false;
+    shadow.getElementById('dyslexic-toggle-checkbox').checked = false;
+    shadow.querySelector('.theme-toggle-text').textContent = 'Light Mode';
+  });
+  
+  shadow.querySelectorAll('.nuva-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      shadow.querySelectorAll('.nuva-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentMode = tab.dataset.tab;
+      
+      const doubtSection = shadow.getElementById('doubt-section');
+      const analyzeBtn = shadow.getElementById('analyze-btn');
+      
+      if (currentMode === 'doubt') {
+        doubtSection.style.display = 'block';
+        analyzeBtn.style.display = 'none';
+      } else {
+        doubtSection.style.display = 'none';
+        analyzeBtn.style.display = 'block';
+      }
+    });
+  });
+  
+  shadow.getElementById('analyze-btn').addEventListener('click', async () => {
+    const intensity = shadow.getElementById('intensity-select').value;
+    const resultArea = shadow.getElementById('result-area');
+    const loadingArea = shadow.getElementById('loading-area');
     
-    #nuva-panel {
-      position: fixed;
-      top: 0;
-      right: 0;
-      width: 420px;
-      height: 100vh;
-      z-index: 999999;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      box-shadow: -5px 0 20px rgba(0, 0, 0, 0.2);
-      animation: slideIn 0.3s ease-out;
+    resultArea.style.display = 'none';
+    loadingArea.style.display = 'block';
+    
+    const content = selectionMode && selectedText ? selectedText : await extractPageContent();
+    const result = await analyzeContent(content, currentMode, intensity);
+    
+    loadingArea.style.display = 'none';
+    resultArea.style.display = 'block';
+    resultArea.innerHTML = result;
+  });
+
+  shadow.getElementById('ask-doubt-btn').addEventListener('click', async () => {
+    const doubtInput = shadow.getElementById('doubt-input');
+    const doubt = doubtInput.value.trim();
+    
+    if (!doubt) {
+      alert('Please enter your doubt or question');
+      return;
     }
     
-    @keyframes slideIn {
-      from { transform: translateX(100%); }
-      to { transform: translateX(0); }
+    const resultArea = shadow.getElementById('result-area');
+    const loadingArea = shadow.getElementById('loading-area');
+    
+    resultArea.style.display = 'none';
+    loadingArea.style.display = 'block';
+    
+    const content = selectionMode && selectedText ? selectedText : await extractPageContent();
+    const result = await answerDoubt(doubt, content);
+    
+    loadingArea.style.display = 'none';
+    resultArea.style.display = 'block';
+    resultArea.innerHTML = result;
+    
+    doubtInput.value = '';
+  });
+}
+
+function getThemeStyles() {
+  const isDark = currentTheme === 'dark';
+  const bgPrimary = isDark ? '#1a1a2e' : '#ffffff';
+  const bgSecondary = isDark ? '#16213e' : '#f8f9fa';
+  const bgTertiary = isDark ? '#0f1624' : '#f0f0f0';
+  const textPrimary = isDark ? '#eee' : '#333';
+  const textSecondary = isDark ? '#aaa' : '#666';
+  const border = isDark ? '#2d3748' : '#e0e0e0';
+  
+  const baseFontSize = dyslexicMode ? '18px' : '14px';
+  const baseLineHeight = dyslexicMode ? '2.2' : '1.8';
+  const baseSpacing = dyslexicMode ? '28px' : '24px';
+  const fontFamily = dyslexicMode ? 'OpenDyslexic, Comic Sans MS, sans-serif' : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  
+  return `
+    @import url('https://fonts.cdnfonts.com/css/opendyslexic');
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    .nuva-panel {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.8);
+      width: 90%; max-width: ${dyslexicMode ? '800px' : '700px'};
+      max-height: 85vh; background: ${bgPrimary};
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, ${isDark ? '0.6' : '0.3'});
+      z-index: 999999; opacity: 0; pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      font-family: ${fontFamily}; display: flex; flex-direction: column;
+      color: ${textPrimary}; font-size: ${baseFontSize};
     }
     
-    .nuva-panel-container {
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-      display: flex;
-      flex-direction: column;
-      transition: all 0.3s ease;
+    .nuva-panel.active { opacity: 1; pointer-events: all; transform: translate(-50%, -50%) scale(1); }
+    
+    .nuva-backdrop {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, ${isDark ? '0.7' : '0.5'}); z-index: 999998;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s; backdrop-filter: blur(4px);
     }
     
-    .nuva-panel-container.dark-mode {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    }
+    .nuva-backdrop.active { opacity: 1; pointer-events: all; }
     
     .nuva-header {
-      padding: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
+      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
+      padding: ${baseSpacing}; border-radius: 20px 20px 0 0; color: white;
+      display: flex; justify-content: space-between; align-items: center;
     }
     
-    .nuva-header-controls {
-      display: flex;
-      gap: 8px;
-      align-items: center;
+    .nuva-title { display: flex; align-items: center; gap: 12px; font-size: ${dyslexicMode ? '26px' : '22px'}; font-weight: 700; }
+
+    .nuva-header-actions { display: flex; gap: 8px; align-items: center; }
+
+    .nuva-icon-btn {
+      background: rgba(255, 255, 255, 0.2); border: none; color: white;
+      width: ${dyslexicMode ? '42px' : '36px'}; height: ${dyslexicMode ? '42px' : '36px'};
+      border-radius: 50%; cursor: pointer; font-size: ${dyslexicMode ? '22px' : '18px'};
+      transition: all 0.3s; display: flex; align-items: center; justify-content: center;
+    }
+
+    .nuva-icon-btn:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.1); }
+    
+    .nuva-close {
+      background: rgba(255, 255, 255, 0.2); border: none; color: white;
+      width: ${dyslexicMode ? '42px' : '36px'}; height: ${dyslexicMode ? '42px' : '36px'};
+      border-radius: 50%; cursor: pointer; font-size: ${dyslexicMode ? '24px' : '20px'}; transition: all 0.3s;
     }
     
-    .nuva-title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: white;
-      font-size: 20px;
-      font-weight: 700;
-    }
+    .nuva-close:hover { background: rgba(255, 255, 255, 0.3); transform: rotate(90deg); }
     
-    .nuva-icon { font-size: 28px; }
-    
-    .nuva-close, .nuva-theme-toggle, .nuva-settings-btn {
-      background: rgba(255, 255, 255, 0.2);
-      border: none;
-      color: white;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 16px;
-      transition: all 0.3s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .nuva-content { flex: 1; padding: ${baseSpacing}; overflow-y: auto; }
+
+    .selection-banner {
+      background: linear-gradient(135deg, ${primaryColor}22 0%, ${secondaryColor}22 100%);
+      border: 2px solid ${primaryColor}; border-radius: 12px;
+      padding: ${dyslexicMode ? '20px' : '16px'}; margin-bottom: ${dyslexicMode ? '24px' : '20px'};
+      animation: slideIn 0.3s ease;
     }
-    
-    .nuva-close:hover, .nuva-theme-toggle:hover, .nuva-settings-btn:hover {
-      background: rgba(255, 255, 255, 0.3);
-      transform: scale(1.1);
+
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .selection-info { display: flex; align-items: flex-start; gap: ${dyslexicMode ? '16px' : '12px'}; }
+    .selection-icon { font-size: ${dyslexicMode ? '28px' : '24px'}; flex-shrink: 0; }
+    .selection-details { flex: 1; min-width: 0; }
+    .selection-details strong {
+      display: block; color: ${primaryColor}; margin-bottom: ${dyslexicMode ? '8px' : '6px'};
+      font-size: ${dyslexicMode ? '18px' : '15px'};
     }
-    
-    .nuva-close:hover {
-      transform: rotate(90deg) scale(1.1);
+    .selection-text-preview {
+      font-size: ${dyslexicMode ? '15px' : '13px'}; color: ${textSecondary}; margin: 0;
+      line-height: 1.4; overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     }
-    
-    .nuva-settings-panel {
-      padding: 20px;
-      background: rgba(255, 255, 255, 0.95);
-      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    .clear-selection-btn {
+      background: ${bgTertiary}; border: none; color: ${textPrimary};
+      width: ${dyslexicMode ? '32px' : '28px'}; height: ${dyslexicMode ? '32px' : '28px'};
+      border-radius: 50%; cursor: pointer; font-size: ${dyslexicMode ? '20px' : '18px'};
+      display: flex; align-items: center; justify-content: center; transition: all 0.3s; flex-shrink: 0;
     }
-    
-    .dark-mode .nuva-settings-panel {
-      background: rgba(30, 30, 50, 0.95);
-      color: white;
-    }
-    
-    .nuva-setting-group {
-      margin-bottom: 15px;
-    }
-    
-    .nuva-setting-label {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 14px;
-      font-weight: 600;
-    }
-    
-    .nuva-setting-hint {
-      font-size: 12px;
-      color: #666;
-      margin: 5px 0 0 0;
-    }
-    
-    .dark-mode .nuva-setting-hint {
-      color: #aaa;
-    }
-    
-    .nuva-color-input {
-      width: 50px;
-      height: 32px;
-      border: 2px solid #ddd;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    
-    .nuva-toggle {
-      position: relative;
-      display: inline-block;
-      width: 50px;
-      height: 24px;
-    }
-    
-    .nuva-toggle input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    
-    .nuva-toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: #ccc;
-      transition: .3s;
-      border-radius: 24px;
-    }
-    
-    .nuva-toggle-slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
-    }
-    
-    .nuva-toggle input:checked + .nuva-toggle-slider {
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-    }
-    
-    .nuva-toggle input:checked + .nuva-toggle-slider:before {
-      transform: translateX(26px);
-    }
-    
-    .nuva-save-settings {
-      width: 100%;
-      padding: 12px;
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-    
-    .nuva-save-settings:hover {
-      transform: scale(1.02);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-    
-    .nuva-content {
-      flex: 1;
-      padding: 20px;
-      overflow-y: auto;
-      background: white;
-    }
-    
-    .dark-mode .nuva-content {
-      background: #1e1e2e;
-      color: white;
-    }
-    
-    .nuva-content.dyslexic-mode, .nuva-content.dyslexic-mode * {
-      font-family: 'OpenDyslexic', sans-serif !important;
-    }
+    .clear-selection-btn:hover { background: ${isDark ? '#2d3748' : '#e0e0e0'}; transform: rotate(90deg); }
     
     .nuva-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 20px;
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: ${dyslexicMode ? '14px' : '10px'}; margin-bottom: ${dyslexicMode ? '24px' : '20px'};
     }
     
     .nuva-tab {
-      flex: 1;
-      padding: 12px 8px;
-      background: #f0f0f0;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 600;
-      color: #666;
-      transition: all 0.3s;
+      padding: ${dyslexicMode ? '18px' : '14px'}; background: ${bgTertiary};
+      border: 2px solid transparent; border-radius: 12px; cursor: pointer;
+      font-size: ${baseFontSize}; font-weight: 600; color: ${textSecondary};
+      transition: all 0.3s; text-align: center;
     }
     
-    .dark-mode .nuva-tab {
-      background: #2a2a3e;
-      color: #aaa;
-    }
-    
-    .nuva-tab:hover { 
-      background: #e0e0e0;
-      transform: translateY(-2px);
-    }
-    
-    .dark-mode .nuva-tab:hover {
-      background: #3a3a4e;
-    }
-    
+    .nuva-tab:hover { background: ${isDark ? '#2d3748' : '#e8e8e8'}; border-color: ${primaryColor}; }
     .nuva-tab.active {
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-      color: white;
+      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
+      color: white; border-color: transparent;
     }
     
     .nuva-settings {
-      background: #f8f9fa;
-      padding: 15px;
-      border-radius: 10px;
-      margin-bottom: 15px;
-    }
-    
-    .dark-mode .nuva-settings {
-      background: #2a2a3e;
+      background: ${bgSecondary}; padding: ${dyslexicMode ? '22px' : '18px'};
+      border-radius: 12px; margin-bottom: ${dyslexicMode ? '22px' : '18px'}; border: 1px solid ${border};
     }
     
     .nuva-label {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 14px;
-      color: #333;
-      font-weight: 600;
-    }
-    
-    .dark-mode .nuva-label {
-      color: white;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: ${baseFontSize}; font-weight: 600; color: ${textPrimary};
     }
     
     .nuva-select {
-      padding: 8px 12px;
-      border: 2px solid #e0e0e0;
-      border-radius: 6px;
-      background: white;
-      font-size: 14px;
-      cursor: pointer;
+      padding: ${dyslexicMode ? '14px 18px' : '10px 14px'}; border: 2px solid ${border};
+      border-radius: 8px; background: ${bgPrimary}; color: ${textPrimary};
+      font-size: ${baseFontSize}; cursor: pointer; transition: border-color 0.3s; font-family: ${fontFamily};
     }
     
-    .dark-mode .nuva-select {
-      background: #1e1e2e;
-      border-color: #3a3a4e;
-      color: white;
+    .nuva-select:focus { outline: none; border-color: ${primaryColor}; }
+
+    .doubt-section { margin-bottom: ${dyslexicMode ? '24px' : '20px'}; }
+    .doubt-input-wrapper { display: flex; flex-direction: column; gap: ${dyslexicMode ? '16px' : '12px'}; }
+    .doubt-input {
+      width: 100%; padding: ${dyslexicMode ? '18px' : '14px'}; border: 2px solid ${border};
+      border-radius: 12px; background: ${bgSecondary}; color: ${textPrimary};
+      font-size: ${baseFontSize}; font-family: ${fontFamily}; line-height: ${baseLineHeight};
+      resize: vertical; min-height: ${dyslexicMode ? '120px' : '90px'};
     }
-    
-    .nuva-source-options {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 15px;
-      flex-wrap: wrap;
-    }
-    
-    .nuva-source-label {
-      flex: 1;
-      min-width: 110px;
-      padding: 10px;
-      background: #f8f9fa;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      text-align: center;
-      transition: all 0.3s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-    }
-    
-    .dark-mode .nuva-source-label {
-      background: #2a2a3e;
-      border-color: #3a3a4e;
-      color: white;
-    }
-    
-    .nuva-source-label:hover {
-      border-color: var(--nuva-primary, #667eea);
-      transform: translateY(-2px);
-    }
-    
-    .nuva-source-label input {
-      display: none;
-    }
-    
-    .nuva-source-label:has(input:checked) {
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-      color: white;
-      border-color: transparent;
-    }
+    .doubt-input:focus { outline: none; border-color: ${primaryColor}; }
+    .doubt-input::placeholder { color: ${textSecondary}; }
     
     .nuva-analyze-btn {
-      width: 100%;
-      padding: 16px;
-      background: linear-gradient(135deg, var(--nuva-primary, #667eea) 0%, var(--nuva-secondary, #764ba2) 100%);
-      color: white;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.3s;
-      margin-bottom: 20px;
+      width: 100%; padding: ${dyslexicMode ? '22px' : '18px'};
+      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
+      color: white; border: none; border-radius: 12px;
+      font-size: ${dyslexicMode ? '18px' : '16px'}; font-weight: 700; cursor: pointer;
+      transition: all 0.3s; margin-bottom: ${dyslexicMode ? '24px' : '20px'}; font-family: ${fontFamily};
     }
     
-    .nuva-analyze-btn:hover {
-      transform: scale(1.02);
-      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-    }
+    .nuva-analyze-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 20px ${primaryColor}66; }
     
     .nuva-result {
-      background: #f8f9fa;
-      border-radius: 12px;
-      padding: 20px;
-      min-height: 200px;
-      line-height: 1.8;
-      color: #333;
+      background: ${bgSecondary}; border-radius: 12px; padding: ${dyslexicMode ? '28px' : '20px'};
+      min-height: 150px; line-height: ${baseLineHeight}; color: ${textPrimary};
+      border: 1px solid ${border}; font-size: ${baseFontSize};
     }
     
-    .dark-mode .nuva-result {
-      background: #2a2a3e;
-      color: white;
-    }
-    
-    .nuva-placeholder {
-      text-align: center;
-      padding: 40px 20px;
-    }
-    
-    .nuva-placeholder-icon {
-      font-size: 48px;
-      margin-bottom: 15px;
-    }
-    
-    .nuva-placeholder p {
-      color: #666;
-      margin: 8px 0;
-    }
-    
-    .dark-mode .nuva-placeholder p {
-      color: #aaa;
-    }
-    
+    .nuva-placeholder { text-align: center; padding: 40px 20px; color: ${textSecondary}; }
+    .nuva-placeholder-icon { font-size: ${dyslexicMode ? '68px' : '56px'}; margin-bottom: ${dyslexicMode ? '20px' : '16px'}; }
     .nuva-hint {
-      font-size: 13px;
-      color: #999;
+      font-size: ${dyslexicMode ? '16px' : '13px'}; color: ${textSecondary};
+      margin-top: ${dyslexicMode ? '12px' : '8px'}; line-height: 1.6;
     }
     
-    .nuva-loading {
-      text-align: center;
-      padding: 40px 20px;
-    }
+    .nuva-loading { text-align: center; padding: 40px 20px; color: ${textSecondary}; }
     
     .nuva-spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid #f0f0f0;
-      border-top: 4px solid var(--nuva-primary, #667eea);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 15px;
+      width: ${dyslexicMode ? '48px' : '40px'}; height: ${dyslexicMode ? '48px' : '40px'};
+      border: 4px solid ${border}; border-top: 4px solid ${primaryColor}; border-radius: 50%;
+      animation: spin 1s linear infinite; margin: 0 auto ${dyslexicMode ? '20px' : '16px'};
     }
     
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    .nuva-success {
+      background: ${isDark ? '#1a4d2e' : '#d4edda'}; border: 2px solid ${isDark ? '#2d6a4f' : '#c3e6cb'};
+      border-radius: 8px; padding: ${dyslexicMode ? '16px' : '12px'};
+      color: ${isDark ? '#95d5b2' : '#155724'}; margin-bottom: ${dyslexicMode ? '20px' : '15px'};
+      font-size: ${baseFontSize};
     }
     
-    .nuva-content::-webkit-scrollbar {
-      width: 8px;
+    .nuva-error {
+      background: ${isDark ? '#4a1a1a' : '#f8d7da'}; border: 2px solid ${isDark ? '#721c24' : '#f5c6cb'};
+      border-radius: 8px; padding: ${dyslexicMode ? '20px' : '15px'}; color: ${isDark ? '#f8a5a8' : '#721c24'};
+    }
+
+    .nuva-settings-panel { flex: 1; padding: ${baseSpacing}; overflow-y: auto; }
+
+    .settings-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: ${baseSpacing}; padding-bottom: ${dyslexicMode ? '20px' : '16px'};
+      border-bottom: 2px solid ${border};
+    }
+
+    .settings-header h3 { font-size: ${dyslexicMode ? '24px' : '20px'}; color: ${textPrimary}; }
+
+    .settings-content { display: flex; flex-direction: column; gap: ${baseSpacing}; }
+
+    .setting-group {
+      background: ${bgSecondary}; padding: ${dyslexicMode ? '24px' : '20px'};
+      border-radius: 12px; border: 1px solid ${border};
+    }
+
+    .setting-label {
+      display: block; font-size: ${dyslexicMode ? '18px' : '15px'}; font-weight: 600;
+      color: ${textPrimary}; margin-bottom: ${dyslexicMode ? '16px' : '12px'};
+    }
+
+    .theme-toggle-wrapper { display: flex; align-items: center; gap: ${dyslexicMode ? '20px' : '16px'}; }
+    .theme-toggle-container { position: relative; display: inline-block; }
+    .theme-toggle-container input[type="checkbox"] { display: none; }
+
+    .theme-toggle-label {
+      display: block; width: ${dyslexicMode ? '110px' : '90px'}; height: ${dyslexicMode ? '52px' : '42px'};
+      background: ${bgTertiary}; border-radius: ${dyslexicMode ? '26px' : '21px'}; position: relative;
+      cursor: pointer; transition: all 0.3s ease; border: 2px solid ${border}; overflow: hidden;
+    }
+
+    .theme-toggle-inner {
+      display: flex; width: 200%; height: 100%; transition: margin-left 0.3s ease; margin-left: 0;
+    }
+
+    .theme-icon, .toggle-text {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      font-size: ${dyslexicMode ? '24px' : '20px'};
+    }
+
+    .toggle-text { font-weight: 700; font-size: ${dyslexicMode ? '16px' : '13px'}; }
+
+    .theme-toggle-container input[type="checkbox"]:checked + .theme-toggle-label .theme-toggle-inner {
+      margin-left: -100%;
+    }
+
+    .theme-toggle-switch {
+      position: absolute; top: ${dyslexicMode ? '6px' : '5px'}; left: ${dyslexicMode ? '6px' : '5px'};
+      width: ${dyslexicMode ? '40px' : '32px'}; height: ${dyslexicMode ? '40px' : '32px'};
+      background: ${primaryColor}; border-radius: 50%; transition: transform 0.3s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .theme-toggle-container input[type="checkbox"]:checked + .theme-toggle-label .theme-toggle-switch {
+      transform: translateX(${dyslexicMode ? '58px' : '48px'});
+    }
+
+    .theme-toggle-text { font-size: ${baseFontSize}; color: ${textPrimary}; font-weight: 500; }
+
+    .color-picker { display: flex; flex-direction: column; gap: ${dyslexicMode ? '20px' : '16px'}; }
+
+    .color-options {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: ${dyslexicMode ? '16px' : '12px'};
+    }
+
+    .color-option {
+      width: 100%; aspect-ratio: 1; border: 3px solid ${border}; border-radius: 12px;
+      cursor: pointer; transition: all 0.3s; position: relative;
+    }
+
+    .color-option:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); }
+
+    .custom-color-wrapper {
+      display: flex; align-items: center; gap: ${dyslexicMode ? '16px' : '12px'};
+      padding: ${dyslexicMode ? '16px' : '12px'}; background: ${bgPrimary};
+      border-radius: 8px; border: 1px solid ${border};
+    }
+
+    .custom-color-wrapper label { font-size: ${baseFontSize}; font-weight: 600; color: ${textPrimary}; }
+
+    .custom-color-wrapper input[type="color"] {
+      width: ${dyslexicMode ? '70px' : '60px'}; height: ${dyslexicMode ? '48px' : '40px'};
+      border: 2px solid ${border}; border-radius: 8px; cursor: pointer;
+    }
+  `;
+}
+
+function updateTheme(shadow) {
+  const styleElement = shadow.querySelector('style');
+  styleElement.textContent = getThemeStyles();
+  
+  const themeBtn = shadow.getElementById('theme-btn');
+  if (themeBtn) {
+    themeBtn.textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+  }
+}
+
+function updateFAB() {
+  const fab = document.getElementById('nuva-fab');
+  if (fab) {
+    fab.style.background = `linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%)`;
+    fab.style.boxShadow = `0 4px 20px ${primaryColor}66`;
+  }
+}
+
+function enableWordHover() {
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target;
+    
+    if (target.nodeType === Node.TEXT_NODE || target.matches('p, span, div, li, td, th, a, h1, h2, h3, h4, h5, h6')) {
+      clearTimeout(hoverTimeout);
+      
+      hoverTimeout = setTimeout(() => {
+        const selection = window.getSelection();
+        let word = selection.toString().trim();
+        
+        if (!word) {
+          const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+          if (range) {
+            const textNode = range.startContainer;
+            if (textNode.nodeType === Node.TEXT_NODE) {
+              const text = textNode.textContent;
+              const offset = range.startOffset;
+              
+              let start = offset;
+              let end = offset;
+              
+              while (start > 0 && /\w/.test(text[start - 1])) start--;
+              while (end < text.length && /\w/.test(text[end])) end++;
+              
+              word = text.substring(start, end).trim();
+            }
+          }
+        }
+        
+        if (word && word.length > 3 && /^[a-zA-Z]+$/.test(word)) {
+          showTooltip(word, e.clientX, e.clientY);
+        }
+      }, 1000);
+    }
+  });
+  
+  document.addEventListener('mouseout', () => {
+    clearTimeout(hoverTimeout);
+  });
+}
+
+async function showTooltip(word, x, y) {
+  if (currentTooltip) {
+    currentTooltip.remove();
+    currentTooltip = null;
+  }
+  
+  const container = document.createElement('div');
+  container.id = 'nuva-tooltip-root';
+  document.body.appendChild(container);
+  
+  const shadow = container.attachShadow({ mode: 'open' });
+  
+  const isDark = currentTheme === 'dark';
+  const bgPrimary = isDark ? '#1a1a2e' : '#ffffff';
+  const bgSecondary = isDark ? '#16213e' : '#f8f9fa';
+  const textPrimary = isDark ? '#eee' : '#333';
+  const textSecondary = isDark ? '#aaa' : '#666';
+  const baseFontSize = dyslexicMode ? '18px' : '14px';
+  const fontFamily = dyslexicMode ? 'OpenDyslexic, Comic Sans MS, sans-serif' : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  
+  const style = document.createElement('style');
+  style.textContent = `
+    @import url('https://fonts.cdnfonts.com/css/opendyslexic');
+    
+    .tooltip {
+      position: fixed; background: ${bgPrimary}; border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, ${isDark ? '0.6' : '0.2'});
+      padding: ${dyslexicMode ? '20px' : '16px'}; max-width: ${dyslexicMode ? '380px' : '320px'};
+      z-index: 9999999; animation: fadeIn 0.2s ease; font-family: ${fontFamily}; color: ${textPrimary};
     }
     
-    .nuva-content::-webkit-scrollbar-track {
-      background: #f1f1f1;
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .tooltip-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: ${dyslexicMode ? '14px' : '10px'}; padding-bottom: ${dyslexicMode ? '14px' : '10px'};
+      border-bottom: 2px solid ${isDark ? '#2d3748' : '#f0f0f0'};
     }
     
-    .dark-mode .nuva-content::-webkit-scrollbar-track {
-      background: #2a2a3e;
+    .tooltip-word { font-size: ${dyslexicMode ? '22px' : '18px'}; font-weight: 700; color: ${primaryColor}; }
+    
+    .tooltip-close {
+      background: none; border: none; font-size: ${dyslexicMode ? '28px' : '24px'}; cursor: pointer;
+      color: ${textSecondary}; width: ${dyslexicMode ? '32px' : '28px'}; height: ${dyslexicMode ? '32px' : '28px'};
+      display: flex; align-items: center; justify-content: center; border-radius: 50%;
+      transition: all 0.2s; padding: 0; line-height: 1;
     }
     
-    .nuva-content::-webkit-scrollbar-thumb {
-      background: #888;
-      border-radius: 4px;
+    .tooltip-close:hover { background: ${bgSecondary}; color: ${textPrimary}; }
+    
+    .tooltip-loading {
+      text-align: center; color: ${textSecondary}; font-size: ${baseFontSize};
+      padding: ${dyslexicMode ? '14px' : '10px'};
     }
     
-    .nuva-doubt-input {
-      margin-bottom: 15px;
+    .tooltip-definition {
+      font-size: ${baseFontSize}; line-height: ${dyslexicMode ? '2.2' : '1.6'};
+      color: ${textPrimary}; margin-bottom: ${dyslexicMode ? '16px' : '12px'};
     }
     
-    .nuva-doubt-textarea {
-      width: 100%;
-      padding: 12px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      resize: vertical;
-      transition: all 0.3s;
-    }
-    
-    .nuva-doubt-textarea:focus {
-      outline: none;
-      border-color: var(--nuva-primary, #667eea);
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    
-    .dark-mode .nuva-doubt-textarea {
-      background: #2a2a3e;
-      border-color: #3a3a4e;
-      color: white;
-    }
-    
-    .dark-mode .nuva-doubt-textarea::placeholder {
-      color: #aaa;
+    .tooltip-example {
+      background: ${bgSecondary}; padding: ${dyslexicMode ? '14px' : '10px'}; border-radius: 8px;
+      font-size: ${baseFontSize}; color: ${textSecondary}; font-style: italic;
+      border-left: 3px solid ${primaryColor}; line-height: ${dyslexicMode ? '2' : '1.5'};
     }
   `;
   
-  document.head.appendChild(style);
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tooltip';
+  tooltip.innerHTML = `
+    <div class="tooltip-header">
+      <div class="tooltip-word">${word}</div>
+      <button class="tooltip-close" id="close-tooltip">×</button>
+    </div>
+    <div class="tooltip-loading">Loading definition...</div>
+  `;
   
-  let currentMode = 'restructure';
-  let currentSource = 'page';
+  const maxX = window.innerWidth - (dyslexicMode ? 400 : 340);
+  const maxY = window.innerHeight - 200;
+  tooltip.style.left = Math.min(x, maxX) + 'px';
+  tooltip.style.top = Math.min(y + 20, maxY) + 'px';
   
-  applyPreferences();
+  shadow.appendChild(style);
+  shadow.appendChild(tooltip);
+  currentTooltip = container;
   
-  const settingsToggle = document.getElementById('nuva-settings-toggle');
-  const settingsPanel = document.getElementById('nuva-settings-panel');
-  if (settingsToggle && settingsPanel) {
-    settingsToggle.addEventListener('click', () => {
-      settingsPanel.style.display = settingsPanel.style.display === 'none' ? 'block' : 'none';
-    });
-  }
-  
-  const themeToggle = document.getElementById('nuva-theme-toggle');
-  if (themeToggle) {
-    themeToggle.addEventListener('click', () => {
-      preferences.theme = preferences.theme === 'light' ? 'dark' : 'light';
-      applyPreferences();
-      savePreferences();
-    });
-  }
-  
-  const primaryColorInput = document.getElementById('nuva-primary-color');
-  const secondaryColorInput = document.getElementById('nuva-secondary-color');
-  if (primaryColorInput) primaryColorInput.value = preferences.primaryColor;
-  if (secondaryColorInput) secondaryColorInput.value = preferences.secondaryColor;
-  
-  const dyslexicToggle = document.getElementById('nuva-dyslexic-toggle');
-  if (dyslexicToggle) dyslexicToggle.checked = preferences.dyslexicMode;
-  
-  const saveSettingsBtn = document.getElementById('nuva-save-settings');
-  if (saveSettingsBtn) {
-    saveSettingsBtn.addEventListener('click', () => {
-      if (primaryColorInput) preferences.primaryColor = primaryColorInput.value;
-      if (secondaryColorInput) preferences.secondaryColor = secondaryColorInput.value;
-      if (dyslexicToggle) preferences.dyslexicMode = dyslexicToggle.checked;
-      
-      applyPreferences();
-      savePreferences();
-      
-      saveSettingsBtn.textContent = '✅ Saved!';
-      setTimeout(() => {
-        saveSettingsBtn.textContent = '💾 Save Settings';
-      }, 2000);
-    });
-  }
-  
-  const closeBtn = document.getElementById('nuva-close');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => overlay.remove());
-  }
-  
-  const tabs = document.querySelectorAll('.nuva-tab');
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      currentMode = tab.getAttribute('data-tab') || 'restructure';
-      
-      // Show/hide relevant UI elements based on mode
-      const intensitySettings = document.getElementById('nuva-intensity-settings');
-      const doubtInput = document.getElementById('nuva-doubt-input');
-      
-      if (currentMode === 'doubt') {
-        if (intensitySettings) intensitySettings.style.display = 'none';
-        if (doubtInput) doubtInput.style.display = 'block';
-      } else {
-        if (intensitySettings) intensitySettings.style.display = 'block';
-        if (doubtInput) doubtInput.style.display = 'none';
-      }
-    });
+  shadow.getElementById('close-tooltip').addEventListener('click', () => {
+    container.remove();
+    currentTooltip = null;
   });
   
-  const sourceRadios = document.querySelectorAll('input[name="source"]');
-  sourceRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      currentSource = e.target.value;
-    });
-  });
-  
-  const analyzeBtn = document.getElementById('nuva-analyze');
-  if (analyzeBtn) {
-    analyzeBtn.addEventListener('click', async () => {
-      const intensitySelect = document.getElementById('nuva-intensity');
-      const intensity = intensitySelect ? intensitySelect.value : 'mid';
-      const resultDiv = document.getElementById('nuva-result');
-      const loadingDiv = document.getElementById('nuva-loading');
-      const doubtQuestion = document.getElementById('nuva-doubt-question');
-      
-      if (resultDiv) resultDiv.style.display = 'none';
-      if (loadingDiv) loadingDiv.style.display = 'block';
-      
-      const pageContent = extractContent(currentSource);
-      
-      if (!pageContent || pageContent.trim() === '') {
-        if (loadingDiv) loadingDiv.style.display = 'none';
-        if (resultDiv) {
-          resultDiv.style.display = 'block';
-          resultDiv.innerHTML = `
-            <div style="padding: 20px; text-align: center; color: #e74c3c;">
-              <p style="font-size: 24px; margin-bottom: 10px;">⚠️</p>
-              <p><strong>No content found!</strong></p>
-              <p style="font-size: 14px; margin-top: 10px;">
-                ${currentSource === 'selection' ? 'Please select some text first.' : 
-                  currentSource === 'pdf' ? 'Unable to extract PDF content. Try selecting text manually.' :
-                  'No readable content found on this page.'}
-              </p>
-            </div>
-          `;
-        }
-        return;
-      }
-      
-      // Check if doubt mode and validate question
-      if (currentMode === 'doubt') {
-        const question = doubtQuestion ? doubtQuestion.value.trim() : '';
-        if (!question) {
-          if (loadingDiv) loadingDiv.style.display = 'none';
-          if (resultDiv) {
-            resultDiv.style.display = 'block';
-            resultDiv.innerHTML = `
-              <div style="padding: 20px; text-align: center; color: #e74c3c;">
-                <p style="font-size: 24px; margin-bottom: 10px;">⚠️</p>
-                <p><strong>Please enter your question!</strong></p>
-                <p style="font-size: 14px; margin-top: 10px;">Type a question in the text box above.</p>
-              </div>
-            `;
-          }
-          return;
-        }
-        const result = await analyzeContent(pageContent, currentMode, intensity, question);
-        if (loadingDiv) loadingDiv.style.display = 'none';
-        if (resultDiv) {
-          resultDiv.style.display = 'block';
-          resultDiv.innerHTML = result;
-        }
-      } else {
-        const result = await analyzeContent(pageContent, currentMode, intensity);
-        if (loadingDiv) loadingDiv.style.display = 'none';
-        if (resultDiv) {
-          resultDiv.style.display = 'block';
-          resultDiv.innerHTML = result;
-        }
-      }
-    });
-  }
+  const definition = await getWordDefinition(word);
+  const loadingDiv = shadow.querySelector('.tooltip-loading');
+  loadingDiv.outerHTML = definition;
 }
 
-function applyPreferences() {
-  const container = document.querySelector('.nuva-panel-container');
-  const content = document.querySelector('.nuva-content');
-  const themeToggle = document.getElementById('nuva-theme-toggle');
-  
-  if (container) {
-    if (preferences.theme === 'dark') {
-      container.classList.add('dark-mode');
-      if (themeToggle) themeToggle.textContent = '☀️';
-    } else {
-      container.classList.remove('dark-mode');
-      if (themeToggle) themeToggle.textContent = '🌙';
-    }
-  }
-  
-  if (content) {
-    if (preferences.dyslexicMode) {
-      content.classList.add('dyslexic-mode');
-    } else {
-      content.classList.remove('dyslexic-mode');
-    }
-  }
-  
-  document.documentElement.style.setProperty('--nuva-primary', preferences.primaryColor);
-  document.documentElement.style.setProperty('--nuva-secondary', preferences.secondaryColor);
-}
-
-function savePreferences() {
-  if (chrome && chrome.storage) {
-    chrome.storage.local.set({ nuvaPreferences: preferences });
-  }
-}
-
-function extractContent(source) {
-  if (source === 'selection') {
-    return window.getSelection().toString().trim() || '';
-  }
-  
-  if (source === 'pdf') {
-    return extractPDFContent() || '';
-  }
-  
-  let mainContent = '';
-  const article = document.querySelector('article');
-  if (article) {
-    mainContent = article.innerText;
-  } else {
-    const main = document.querySelector('main');
-    if (main) {
-      mainContent = main.innerText;
-    } else {
-      const paragraphs = document.querySelectorAll('p');
-      paragraphs.forEach(p => {
-        mainContent += p.innerText + '\n';
-      });
-    }
-  }
-  
-  mainContent = mainContent.trim();
-  return mainContent.length > 4000 ? mainContent.substring(0, 4000) : mainContent;
-}
-
-function extractPDFContent() {
-  const textLayers = document.querySelectorAll('.textLayer');
-  if (textLayers.length > 0) {
-    let pdfText = '';
-    textLayers.forEach(layer => {
-      pdfText += layer.innerText + '\n';
-    });
-    return pdfText.trim();
-  }
-  
-  const pdfViewers = [
-    '#viewer .page',
-    '.pdfViewer .page',
-    '[data-page-number]',
-    '.page',
-    '#pageContainer'
-  ];
-  
-  for (const selector of pdfViewers) {
-    const pages = document.querySelectorAll(selector);
-    if (pages.length > 0) {
-      let pdfText = '';
-      pages.forEach(page => {
-        pdfText += page.innerText + '\n';
-      });
-      if (pdfText.trim()) return pdfText.trim();
-    }
-  }
-  
-  const iframes = document.querySelectorAll('iframe');
-  for (const iframe of iframes) {
-    try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      const iframeText = iframeDoc.body.innerText;
-      if (iframeText && iframeText.trim()) return iframeText.trim();
-    } catch (e) {
-      continue;
-    }
-  }
-  
-  return '';
-}
-
-async function analyzeContent(content, mode, intensity, userQuestion = null) {
+async function getWordDefinition(word) {
   try {
-    const prompts = {
-      restructure: {
-        low: `Restructure this text to improve readability. Use simple language and short sentences. Keep all the original information:\n\n${content}`,
-        mid: `Restructure this text with better organization and flow. Break complex sentences into simpler ones. Maintain all original information but improve clarity:\n\n${content}`,
-        high: `Completely restructure this text for optimal readability. Use clear headings, short paragraphs, and simple language. Transform complex ideas into accessible explanations while preserving all details:\n\n${content}`
-      },
-      simplify: {
-        low: `Break down the main concepts in this text into simple explanations:\n\n${content}`,
-        mid: `Provide a conceptual breakdown of this text. Explain key ideas in simple terms with examples where helpful:\n\n${content}`,
-        high: `Create a comprehensive conceptual breakdown. Explain each major idea simply, use analogies, and provide clear examples:\n\n${content}`
-      },
-      organize: {
-        low: `Organize this text with clear headings and better structure:\n\n${content}`,
-        mid: `Reorganize this text with a logical hierarchy. Use headings, subheadings, and bullet points for clarity:\n\n${content}`,
-        high: `Create a highly organized version of this text. Use multiple heading levels, bullet points, numbered lists, and clear sections for maximum visual clarity:\n\n${content}`
-      },
-      doubt: {
-        low: `Based on this content, answer the following question in a clear and simple way:\n\nContent: ${content}\n\nQuestion: ${userQuestion}`,
-        mid: `Based on this content, provide a detailed answer to the following question. Include relevant examples and explanations:\n\nContent: ${content}\n\nQuestion: ${userQuestion}`,
-        high: `Based on this content, provide a comprehensive answer to the following question. Include detailed explanations, examples, and any relevant context:\n\nContent: ${content}\n\nQuestion: ${userQuestion}`
-      }
-    };
-    
-    const prompt = mode === 'doubt' ? prompts[mode][intensity] : prompts[mode][intensity];
+    const prompt = `Define the word "${word}" in one clear sentence. Then provide a short example sentence using the word. do not truncate and give complete information . it should be in the given Format:
+Definition: [definition]
+Example: [example]`;
     
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
-        }
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 200 }
       })
     });
     
-    if (!response.ok) {
-      throw new Error(`API Error ${response.status}`);
+    if (!response.ok) throw new Error('API request failed');
+    
+    const data = await response.json();
+    const text = data.candidates[0]?.content?.parts[0]?.text || '';
+    
+    const defMatch = text.match(/Definition:\s*(.+?)(?=Example:|$)/is);
+    const exMatch = text.match(/Example:\s*(.+?)$/is);
+    
+    const definition = defMatch ? defMatch[1].trim() : text;
+    const example = exMatch ? exMatch[1].trim() : '';
+    
+    return `
+      <div class="tooltip-definition">${definition}</div>
+      ${example ? `<div class="tooltip-example">${example}</div>` : ''}
+    `;
+  } catch (error) {
+    return `<div class="tooltip-definition" style="color: #c00;">Failed to load definition. Try again later.</div>`;
+  }
+}
+
+function togglePanel() {
+  const root = document.getElementById('nuva-root');
+  if (root && root.shadowRoot) {
+    const panel = root.shadowRoot.querySelector('.nuva-panel');
+    const backdrop = root.shadowRoot.querySelector('.nuva-backdrop');
+    panel.classList.toggle('active');
+    backdrop.classList.toggle('active');
+  }
+}
+
+// ENHANCED: COMPREHENSIVE CONTENT EXTRACTION - WORKS WITH ALL MEDIA TYPES
+async function extractPageContent() {
+  let content = '';
+  console.log('🔍 Extracting content from:', window.location.href);
+  
+  // WAIT for page to fully load
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  // PDF extraction - ENHANCED with multiple methods
+  if (window.location.href.includes('.pdf') || document.querySelector('embed[type="application/pdf"]') || document.querySelector('iframe[src*=".pdf"]')) {
+    console.log('📄 Detected PDF');
+    try {
+      // Method 1: Text layers (PDF.js)
+      const textLayers = document.querySelectorAll('.textLayer, .textLayer span, [class*="textLayer"]');
+      if (textLayers.length > 0) {
+        console.log('✅ Found textLayers:', textLayers.length);
+        textLayers.forEach(layer => { content += layer.textContent + '\n'; });
+      }
+      
+      // Method 2: Canvas-based PDF viewers
+      if (!content) {
+        const pdfSpans = document.querySelectorAll('[role="document"] span, .page span, [data-page-number] span');
+        console.log('📝 Found PDF spans:', pdfSpans.length);
+        pdfSpans.forEach(span => { content += span.textContent + ' '; });
+      }
+      
+      // Method 3: PDF iframe content
+      if (!content) {
+        const iframes = document.querySelectorAll('iframe');
+        for (const iframe of iframes) {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            const iframeText = iframeDoc.body.innerText;
+            if (iframeText) content += iframeText;
+          } catch (e) { console.log('iframe access blocked'); }
+        }
+      }
+    } catch (e) { console.log('PDF extraction error:', e); }
+  }
+  
+  // Google Docs - ENHANCED comprehensive extraction
+  if (window.location.href.includes('docs.google.com/document')) {
+    console.log('📝 Detected Google Docs');
+    try {
+      // Method 1: Main content area
+      const selectors = [
+        '.kix-pagesection',
+        '.kix-page-content-wrapper',
+        '[role="document"]',
+        '.kix-appview-editor'
+      ];
+      
+      for (const selector of selectors) {
+        const docsContent = document.querySelector(selector);
+        if (docsContent && docsContent.innerText) {
+          console.log('✅ Found content with:', selector);
+          content = docsContent.innerText;
+          break;
+        }
+      }
+      
+      // Method 2: Individual paragraphs
+      if (!content) {
+        const paragraphs = document.querySelectorAll('.kix-paragraphrenderer, .kix-lineview, .kix-lineview-text-block');
+        console.log('📝 Found paragraphs:', paragraphs.length);
+        paragraphs.forEach(p => { content += p.textContent + '\n'; });
+      }
+      
+      // Method 3: All text spans
+      if (!content) {
+        const spans = document.querySelectorAll('.kix-wordhtmlgenerator-word-node, [role="textbox"]');
+        console.log('📝 Found spans:', spans.length);
+        spans.forEach(span => { content += span.textContent + ' '; });
+      }
+    } catch (e) { console.log('Google Docs error:', e); }
+  }
+  
+  // Google Slides - ENHANCED extraction
+  if (window.location.href.includes('docs.google.com/presentation')) {
+    console.log('🎨 Detected Google Slides');
+    try {
+      // Method 1: Slide content
+      const slideSelectors = [
+        '.sketchy-text-content-wrapper',
+        '.sketchy-text-content',
+        '[role="textbox"]',
+        '.punch-viewer-content'
+      ];
+      
+      slideSelectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => {
+          if (el.textContent.trim()) content += el.textContent + '\n';
+        });
+      });
+      
+      // Method 2: SVG text elements
+      document.querySelectorAll('svg text, g text').forEach(text => {
+        if (text.textContent.trim()) content += text.textContent + ' ';
+      });
+      
+      // Method 3: Speaker notes
+      const notes = document.querySelector('.punch-viewer-speakernotes-page, [aria-label*="Speaker notes"]');
+      if (notes) { content += '\n\n📝 Notes:\n' + notes.textContent; }
+      
+      console.log('✅ Slides content length:', content.length);
+    } catch (e) { console.log('Google Slides error:', e); }
+  }
+  
+  // Google Sheets - ENHANCED extraction
+  if (window.location.href.includes('docs.google.com/spreadsheets')) {
+    console.log('📊 Detected Google Sheets');
+    try {
+      const cells = document.querySelectorAll('.grid-container .s-cell-content, .cell-input, [role="gridcell"]');
+      console.log('📊 Found cells:', cells.length);
+      cells.forEach(cell => {
+        if (cell.textContent.trim()) content += cell.textContent + '\t';
+      });
+    } catch (e) { console.log('Google Sheets error:', e); }
+  }
+  
+  // Notion - ENHANCED extraction
+  if (window.location.href.includes('notion.so') || window.location.href.includes('notion.site')) {
+    console.log('📓 Detected Notion');
+    try {
+      const notionSelectors = [
+        '[data-block-id]',
+        '.notion-page-content',
+        '[class*="notion"]',
+        'article',
+        'main'
+      ];
+      
+      for (const selector of notionSelectors) {
+        const notionContent = document.querySelector(selector);
+        if (notionContent && notionContent.innerText) {
+          console.log('✅ Found Notion content');
+          content = notionContent.innerText;
+          break;
+        }
+      }
+    } catch (e) { console.log('Notion error:', e); }
+  }
+  
+  // Microsoft Office Online - ENHANCED
+  if (window.location.href.includes('office.com') || window.location.href.includes('officeapps.live.com') || window.location.href.includes('sharepoint.com')) {
+    console.log('📄 Detected Microsoft Office');
+    try {
+      const officeSelectors = [
+        '.Page',
+        '.Slide',
+        '[role="document"]',
+        '#WACViewPanel',
+        '.EmbedViewerWrapper'
+      ];
+      
+      officeSelectors.forEach(selector => {
+        document.querySelectorAll(`${selector} p, ${selector} span, ${selector} div`).forEach(el => {
+          if (el.textContent.trim() && !el.querySelector('p, span, div')) {
+            content += el.textContent + '\n';
+          }
+        });
+      });
+      console.log('✅ Office content length:', content.length);
+    } catch (e) { console.log('Office error:', e); }
+  }
+  
+  // Canva - ENHANCED extraction
+  if (window.location.href.includes('canva.com')) {
+    console.log('🎨 Detected Canva');
+    try {
+      const canvaSelectors = [
+        '[data-text-node]',
+        '.text-container',
+        '[role="textbox"]',
+        '[class*="text"]'
+      ];
+      
+      canvaSelectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => {
+          if (el.textContent.trim()) content += el.textContent + '\n';
+        });
+      });
+    } catch (e) { console.log('Canva error:', e); }
+  }
+  
+  // Medium articles
+  if (window.location.href.includes('medium.com') || document.querySelector('article[data-post-id]')) {
+    console.log('📰 Detected Medium');
+    try {
+      const article = document.querySelector('article');
+      if (article) { content = article.innerText; }
+    } catch (e) { console.log('Medium error:', e); }
+  }
+  
+  // Wikipedia
+  if (window.location.href.includes('wikipedia.org')) {
+    console.log('📚 Detected Wikipedia');
+    try {
+      const wikiContent = document.querySelector('#mw-content-text, .mw-parser-output');
+      if (wikiContent) { content = wikiContent.innerText; }
+    } catch (e) { console.log('Wikipedia error:', e); }
+  }
+  
+  // YouTube transcripts
+  if (window.location.href.includes('youtube.com')) {
+    console.log('🎥 Detected YouTube');
+    try {
+      const description = document.querySelector('#description, ytd-video-secondary-info-renderer #description');
+      if (description) { content = 'Video Description:\n' + description.innerText; }
+    } catch (e) { console.log('YouTube error:', e); }
+  }
+  
+  // Generic fallback for OTHER websites
+  if (!content || content.length < 50) {
+    console.log('🌐 Using generic extraction');
+    
+    // Try article tag first
+    const article = document.querySelector('article');
+    if (article && article.innerText && article.innerText.length > 100) {
+      content = article.innerText;
+      console.log('✅ Found article tag');
+    } else {
+      // Try main tag
+      const main = document.querySelector('main');
+      if (main && main.innerText && main.innerText.length > 100) {
+        content = main.innerText;
+        console.log('✅ Found main tag');
+      } else {
+        // Try common content containers
+        const containers = document.querySelectorAll('[role="main"], .content, #content, .post, .article, .entry-content, .post-content, [class*="content"]');
+        let maxContent = '';
+        containers.forEach(el => {
+          if (el.innerText && el.innerText.length > maxContent.length) {
+            maxContent = el.innerText;
+          }
+        });
+        
+        if (maxContent.length > 100) {
+          content = maxContent;
+          console.log('✅ Found content container');
+        } else {
+          // Last resort: get all readable text
+          console.log('⚠️ Last resort extraction');
+          const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, code');
+          const seenText = new Set();
+          textElements.forEach(el => {
+            const text = el.innerText?.trim();
+            if (text && text.length > 20 && !seenText.has(text)) {
+              seenText.add(text);
+              content += text + '\n';
+            }
+          });
+        }
+      }
     }
+  }
+  
+  // Clean up content
+  content = content
+    .replace(/\s+/g, ' ')  // Replace multiple spaces
+    .replace(/\n\s*\n\s*\n/g, '\n\n')  // Remove excessive line breaks
+    .trim();
+  
+  console.log('📊 Final content length:', content.length);
+  
+  return content || 'No readable content found on this page. Try selecting specific text to analyze, or the page content may not be accessible yet.';
+}
+
+async function analyzeContent(content, mode, intensity) {
+  try {
+    const contentLength = content.length;
+    const maxContentLength = contentLength > 15000 ? 15000 : contentLength;
+    const truncatedContent = content.substring(0, maxContentLength);
+    
+    const prompts = {
+      summarize: {
+        short: `Provide a brief, concise summary of this text. Focus on the main idea in 3-4 sentences. do not truncate and give complete information, and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        medium: `Provide a comprehensive summary of this text. Include all important points and key details. Give me COMPLETE information.do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        detailed: `Provide an EXTREMELY detailed and thorough summary of this text. Cover ALL main points, supporting details, examples, and nuances. Be COMPREHENSIVE. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`
+      },
+      simplify: {
+        short: `Explain this text in very simple, easy-to-understand language. Keep it brief and clear. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        medium: `Rewrite this text in simple, accessible language that anyone can understand. Maintain all important information. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        detailed: `Break down this text COMPLETELY into simple, easy-to-understand language. Explain every concept thoroughly with examples. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`
+      },
+      points: {
+        short: `Extract and list the 5-7 most important key points from this text. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        medium: `Create a comprehensive list of ALL important points from this text. Include brief explanations. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`,
+        detailed: `Create an exhaustive, detailed breakdown of ALL points, sub-points, and details from this text. Be THOROUGH. do not truncate and give complete information and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph:\n\n${truncatedContent}`
+      }
+    };
+    
+    const prompt = prompts[mode][intensity];
+    const maxTokens = intensity === 'detailed' ? 8192 : intensity === 'medium' ? 4096 : 2048;
+    
+    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, topK: 40, topP: 0.95, maxOutputTokens: maxTokens },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+        ]
+      })
+    });
+    
+    if (!response.ok) throw new Error(`API Error ${response.status}`);
     
     const data = await response.json();
     
-    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-      const text = data.candidates[0].content.parts[0].text;
-      return text.replace(/\n/g, '<br>');
+    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+      const aiText = data.candidates[0].content.parts[0].text;
+      
+      return `
+        <div class="nuva-success">
+          <strong>✅ AI Analysis Complete (${intensity.toUpperCase()} detail level)</strong>
+          ${selectionMode ? '<p style="margin-top: 8px; font-size: 13px;">Analysis of selected text</p>' : ''}
+        </div>
+        <div style="line-height: ${dyslexicMode ? '2.2' : '1.8'};">${formatText(aiText)}</div>
+      `;
+    } else {
+      throw new Error('Invalid response format from API');
     }
-    
-    return '<p style="color: #e74c3c;">Unable to process content. Please try again.</p>';
-    
   } catch (error) {
     console.error('Error:', error);
-    return `<p style="color: #e74c3c;">Error processing content: ${error.message}</p>`;
+    return `
+      <div class="nuva-error">
+        <strong>⚠️ Error</strong>
+        <p style="margin: 10px 0 0 0;">${error.message}</p>
+      </div>
+    `;
   }
+}
 
+async function answerDoubt(question, pageContent) {
+  try {
+    const contentPreview = pageContent.length > 3000 ? pageContent.substring(0, 3000) : pageContent;
+    
+    const prompt = `You are a helpful and brilliant educational assistant. A student has a question about the content they are reading.
+
+${selectionMode ? 'Selected Text:' : 'Page Content Preview:'}
+${contentPreview}
+
+Student's Question: ${question}
+
+Provide a comprehensive, detailed answer that:
+1. Directly answers their question
+2. Provides context and background information
+3. Includes examples where helpful
+4. Uses clear, student-friendly language
+5. Is thorough and complete
+
+Give a COMPLETE response, do not truncate and give complete response and also give the paragraph number from which you are taking information from like (...) where you provide the first line of the paragraph you extracted answer from. Be detailed and helpful.`;
+    
+    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.8, topK: 40, topP: 0.95, maxOutputTokens: 8192 },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+        ]
+      })
+    });
+    
+    if (!response.ok) throw new Error(`API Error ${response.status}`);
+    
+    const data = await response.json();
+    
+    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+      const aiText = data.candidates[0].content.parts[0].text;
+      
+      return `
+        <div class="nuva-success">
+          <strong>💬 Answer to your doubt:</strong>
+          ${selectionMode ? '<p style="margin-top: 8px; font-size: 13px;">Based on selected text</p>' : ''}
+        </div>
+        <div style="line-height: ${dyslexicMode ? '2.2' : '1.8'};">${formatText(aiText)}</div>
+      `;
+    } else {
+      throw new Error('Invalid response format from API');
+    }
+  } catch (error) {
+    console.error('Error:', error);
+    return `
+      <div class="nuva-error">
+        <strong>⚠️ Error</strong>
+        <p style="margin: 10px 0 0 0;">${error.message}</p>
+        <p style="margin: 10px 0 0 0; font-size: 12px;">Please try again or rephrase your question.</p>
+      </div>
+    `;
+  }
+}
+
+function formatText(text) {
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  const paragraphs = text.split('\n\n');
+  let formatted = '';
+  
+  const spacing = dyslexicMode ? '20px' : '15px';
+  const listSpacing = dyslexicMode ? '10px' : '5px';
+  
+  paragraphs.forEach(para => {
+    if (para.trim().startsWith('- ') || para.trim().startsWith('• ') || para.trim().match(/^\d+\./)) {
+      const items = para.split('\n');
+      formatted += `<ul style="margin: ${spacing} 0; padding-left: ${dyslexicMode ? '30px' : '20px'};">`;
+      items.forEach(item => {
+        const cleanItem = item.replace(/^[-•]\s*/, '').replace(/^\d+\.\s*/, '').trim();
+        if (cleanItem) {
+          formatted += `<li style="margin: ${listSpacing} 0;">${cleanItem}</li>`;
+        }
+      });
+      formatted += '</ul>';
+    } else if (para.trim()) {
+      formatted += `<p style="margin: ${spacing} 0;">${para.trim()}</p>`;
+    }
+  });
+  
+  return formatted;
 }
