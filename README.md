@@ -1,62 +1,57 @@
-# Nuva – AI Reading Assistant
+# Nuva – AI Assistant
 
-Nuva is a **privacy-first AI-powered Chrome extension** designed to improve the readability and cognitive accessibility of web content for users with dyslexia, ADHD, and other learning differences. Unlike traditional summarization tools, Nuva **restructures and reorganizes text without removing any information**, ensuring full content fidelity while enhancing comprehension.
+Nuva is a privacy-first Chrome extension that uses on-device AI to restructure web content for improved cognitive accessibility, supporting neurodivergent users without summarizing or removing information.
 
-## Problem Statement
-Many individuals struggle to read and understand web content due to cognitive and learning differences. Existing tools often:
-- Rely on **summarization**, which removes important details
-- Make only **minor visual changes**
-- Use **cloud-based AI**, raising privacy concerns
+The extension operates directly within the browser, enabling real-time, context-aware content restructuring while ensuring user data remains on-device.
 
-There is a need for an **accessible, privacy-preserving solution** that improves readability without altering the original meaning of content.
+---
 
-## Solution
-Nuva addresses this problem by using **on-device AI** to transform web content directly within the browser. It enhances readability while preserving all original information and works **entirely offline**, ensuring user data privacy.
+## MVP Overview
 
-## Key Features
-- **AI-powered text restructuring** (no summarization)
-- Three adaptive reading modes:
-  - Simplified conceptual breakdown  
-  - Improved visual organization  
-  - Predictable reading flow  
-- Adjustable **intensity levels** (Low / Mid / High)
-- **OpenDyslexic font** support
-- Cognitive-friendly **color themes**
-- Customizable spacing and layout
-- Works across **all websites**
-- **Fully offline and privacy-preserving**
+This repository contains the **Minimum Viable Product (MVP)** of Nuva, developed as a **proof of concept** to validate the core functionality, workflow, and user experience.
 
-## How It Works
-1. User opens the Nuva panel on any webpage
-2. Nuva extracts readable content from the page
-3. On-device AI restructures the text based on selected mode and intensity
-4. Enhanced content is displayed directly in the browser without data leaving the device
+Due to current access constraints on production-only models, the MVP uses **Gemini 2.5** for prototyping and functional validation. In a full production deployment, the same architecture is designed to transition to **Gemini Nano** for on-device inference, improved privacy, and lower latency.
 
-## Tech Stack
-- **JavaScript**
-- **HTML / CSS**
-- **Chrome Extensions API (Manifest V3)**
-- **Gemini Nano (On-device AI)**
-- **Chrome Prompt API**
-- **Web Platform APIs (DOM parsing & injection)**
+---
 
-## Impact & Use Cases
-- Improves accessibility in **education and e-learning**
-- Enhances **workplace productivity**
-- Supports **digital accessibility compliance**
-- Promotes inclusive **assistive technology**
-- Enables real-world applications of **on-device AI**
-  
-## Opportunities & Benefits
-- Supports neurodivergent users without stigmatization
-- Eliminates dependency on cloud-based AI systems
-- Preserves user privacy and data security
-- Scales seamlessly across websites and platforms
+## MVP Development Process
 
-## Future Enhancements
-- Multi-language text adaptation
-- User-defined cognitive profiles
-- Educational institution integrations
-- Local-only accessibility analytics
-- Collaboration with disability advocacy groups
+1. **Problem Identification**  
+   Identified cognitive overload and accessibility challenges faced by neurodivergent users when consuming dense or poorly structured web content.
 
+2. **Solution Design**  
+   Designed a browser-native solution that restructures existing content (layout, hierarchy, spacing, and emphasis) without summarization or loss of information.
+
+3. **Architecture Selection**  
+   Chose a Chrome extension architecture to enable in-context interaction with web pages and minimize user friction.
+
+4. **Model Selection (PoC Phase)**  
+   Implemented Gemini 2.5 to validate AI-driven restructuring logic during rapid prototyping.
+
+5. **MVP Implementation**  
+   - Content scripts to analyze and restructure web pages  
+   - Lightweight UI for user controls  
+   - Privacy-first handling with no persistent data storage  
+
+6. **Validation**  
+   Tested the extension across multiple websites to ensure consistency, responsiveness, and accessibility improvements.
+
+---
+
+## Installation (MVP)
+
+1. Clone or download this repository  
+2. Open Chrome and navigate to `chrome://extensions`  
+3. Enable **Developer Mode** (top-right)  
+4. Click **Load unpacked**  
+5. Select the project folder  
+
+The Nuva MVP will now be installed locally.
+
+---
+
+## Notes
+
+- This MVP is intended for evaluation and demonstration purposes  
+- No user data is stored or transmitted  
+- Production deployment will replace the prototype model with Gemini Nano for fully on-device processing
