@@ -2,7 +2,7 @@
 // FILE: content.js - COMPLETE VERSION
 // ====================
 
-const API_KEY = 'AIzaSyBk-ldqEuFGUgKVOI7P6sZC_7XYmyXdweM';
+const API_KEY = MY_API_KEY;
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 let preferences = {
@@ -908,4 +908,5 @@ async function analyzeContent(content, mode, intensity, userQuestion = null) {
     console.error('Error:', error);
     return `<p style="color: #e74c3c;">Error processing content: ${error.message}</p>`;
   }
+
 }
