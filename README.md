@@ -45,7 +45,7 @@ Due to current access constraints on production-only models, the MVP uses **Gemi
 3. Enable **Developer Mode** (top-right)  
 4. Click **Load unpacked**  
 5. Select the project folder  
-6. Make your own API Key and fill it in the place of MY-API_KEY given in content.js
+6. Make your own API Key and fill it in the place of MY_API_KEY given in content.js
    
 The Nuva MVP will now be installed locally.
 
